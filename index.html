@@ -1,0 +1,214 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>N-Body Orbital Simulator — Live Demo</title>
+<style>
+  body { margin:0; background:#0a0a12; color:#e8e8f0; font-family: 'Segoe UI', system-ui, sans-serif; }
+  #wrap { max-width: 900px; margin: 0 auto; padding: 20px; }
+  h1 { font-size: 1.3rem; font-weight: 600; margin-bottom: 4px; }
+  p.sub { color: #9090a8; margin-top: 0; font-size: 0.9rem; }
+  canvas { background: #000; border-radius: 8px; display:block; margin: 12px 0; cursor: crosshair; }
+  .controls { display:flex; flex-wrap:wrap; gap: 10px; align-items:center; margin-bottom: 10px;}
+  button { background:#3a3a5c; color:#fff; border:none; padding:8px 14px; border-radius:6px; cursor:pointer; font-size:0.85rem;}
+  button:hover { background:#4a4a72; }
+  label { font-size: 0.8rem; color:#b0b0c8; display:flex; align-items:center; gap:6px;}
+  input[type=range]{ width:100px; }
+  #stats { font-size: 0.8rem; color:#8888a8; display:flex; gap:20px; flex-wrap:wrap; }
+  .hint { font-size: 0.78rem; color:#6a6a88; margin-top:6px;}
+</style>
+</head>
+<body>
+<div id="wrap">
+  <h1>N-Body Orbital Simulator</h1>
+  <p class="sub">Velocity-Verlet integration + collision-avoidance delta-v, running live in your browser.</p>
+
+  <div class="controls">
+    <button id="pauseBtn">Pause</button>
+    <button id="resetBtn">Reset</button>
+    <label>Gravity strength <input type="range" id="gSlider" min="1" max="200" value="60"></label>
+    <label>Trail length <input type="range" id="trailSlider" min="10" max="400" value="150"></label>
+    <label><input type="checkbox" id="avoidCheck" checked> Collision avoidance</label>
+  </div>
+  <canvas id="c" width="860" height="500"></canvas>
+  <div id="stats">
+    <span id="energyStat">Energy drift: 0.00%</span>
+    <span id="bodyStat">Bodies: 0</span>
+    <span id="eventStat">Near-miss events: 0</span>
+  </div>
+  <p class="hint">Click anywhere to add a new body with a small random velocity. Click-drag to launch it with velocity in that direction.</p>
+</div>
+
+<script>
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+const W = canvas.width, H = canvas.height;
+const cx = W/2, cy = H/2;
+
+let G = 60;
+let paused = false;
+let avoidance = true;
+let trailMax = 150;
+let events = 0;
+let e0 = null;
+
+class Body {
+  constructor(x,y,vx,vy,mass,radius,color){
+    this.x=x; this.y=y; this.vx=vx; this.vy=vy;
+    this.mass=mass; this.radius=radius; this.color=color;
+    this.trail=[];
+  }
+}
+
+let bodies = [];
+
+function seed(){
+  bodies = [];
+  events = 0;
+  bodies.push(new Body(cx, cy, 0, 0, 20000, 14, '#ffd34d'));         // "sun"
+  bodies.push(new Body(cx+180, cy, 0, -8.2, 40, 5, '#5aa9ff'));       // planet
+  bodies.push(new Body(cx+180+28, cy, 0, -8.2-3.1, 5, 2.5, '#c9c9d8')); // moon
+  bodies.push(new Body(cx-260, cy+40, 1.2, 6.6, 60, 6, '#ff7a59'));   // rogue body
+  e0 = totalEnergy();
+}
+
+function totalEnergy(){
+  let ke=0, pe=0;
+  for(let i=0;i<bodies.length;i++){
+    const b=bodies[i];
+    ke += 0.5*b.mass*(b.vx*b.vx+b.vy*b.vy);
+    for(let j=i+1;j<bodies.length;j++){
+      const o=bodies[j];
+      const dx=o.x-b.x, dy=o.y-b.y;
+      const d=Math.sqrt(dx*dx+dy*dy)+1e-6;
+      pe -= G*b.mass*o.mass/d;
+    }
+  }
+  return ke+pe;
+}
+
+function accelerations(){
+  const acc = bodies.map(()=>({ax:0, ay:0}));
+  for(let i=0;i<bodies.length;i++){
+    for(let j=0;j<bodies.length;j++){
+      if(i===j) continue;
+      const b=bodies[i], o=bodies[j];
+      const dx=o.x-b.x, dy=o.y-b.y;
+      const d2 = dx*dx+dy*dy+4; // softening
+      const d = Math.sqrt(d2);
+      const f = G*o.mass/(d2*d);
+      acc[i].ax += f*dx;
+      acc[i].ay += f*dy;
+    }
+  }
+  return acc;
+}
+
+function collisionAvoid(){
+  for(let i=0;i<bodies.length;i++){
+    for(let j=i+1;j<bodies.length;j++){
+      const b=bodies[i], o=bodies[j];
+      const dx=o.x-b.x, dy=o.y-b.y;
+      const d = Math.sqrt(dx*dx+dy*dy)+1e-6;
+      const danger = 3.5*(b.radius+o.radius);
+      if(d < danger){
+        const nx=dx/d, ny=dy/d;
+        const rvx=o.vx-b.vx, rvy=o.vy-b.vy;
+        const closing = -(rvx*nx+rvy*ny);
+        if(closing>0){
+          const penetration = 1 - d/danger;
+          const impulse = 0.12*closing*penetration;
+          b.vx -= nx*impulse*0.5; b.vy -= ny*impulse*0.5;
+          o.vx += nx*impulse*0.5; o.vy += ny*impulse*0.5;
+        }
+      }
+      if(d < b.radius+o.radius) events++;
+    }
+  }
+}
+
+function step(dt){
+  const accOld = accelerations();
+  for(let i=0;i<bodies.length;i++){
+    const b=bodies[i];
+    b.x += b.vx*dt + 0.5*accOld[i].ax*dt*dt;
+    b.y += b.vy*dt + 0.5*accOld[i].ay*dt*dt;
+  }
+  const accNew = accelerations();
+  for(let i=0;i<bodies.length;i++){
+    const b=bodies[i];
+    b.vx += 0.5*(accOld[i].ax+accNew[i].ax)*dt;
+    b.vy += 0.5*(accOld[i].ay+accNew[i].ay)*dt;
+  }
+  if(avoidance) collisionAvoid();
+  for(const b of bodies){
+    b.trail.push([b.x,b.y]);
+    if(b.trail.length>trailMax) b.trail.shift();
+  }
+}
+
+function draw(){
+  ctx.fillStyle='#000';
+  ctx.fillRect(0,0,W,H);
+  for(const b of bodies){
+    ctx.beginPath();
+    for(let i=0;i<b.trail.length;i++){
+      const [tx,ty]=b.trail[i];
+      if(i===0) ctx.moveTo(tx,ty); else ctx.lineTo(tx,ty);
+    }
+    ctx.strokeStyle = b.color+'80';
+    ctx.lineWidth=1;
+    ctx.stroke();
+
+    ctx.beginPath();
+    ctx.arc(b.x,b.y,b.radius,0,Math.PI*2);
+    ctx.fillStyle=b.color;
+    ctx.fill();
+  }
+}
+
+function loop(){
+  if(!paused){
+    for(let s=0;s<3;s++) step(0.4);
+    const e1 = totalEnergy();
+    const drift = e0 ? Math.abs((e1-e0)/e0)*100 : 0;
+    document.getElementById('energyStat').textContent = `Energy drift: ${drift.toFixed(3)}%`;
+    document.getElementById('bodyStat').textContent = `Bodies: ${bodies.length}`;
+    document.getElementById('eventStat').textContent = `Near-miss events: ${events}`;
+  }
+  draw();
+  requestAnimationFrame(loop);
+}
+
+// interaction: click to add, drag to set launch velocity
+let dragStart = null;
+canvas.addEventListener('mousedown', e=>{
+  const r = canvas.getBoundingClientRect();
+  dragStart = [e.clientX-r.left, e.clientY-r.top];
+});
+canvas.addEventListener('mouseup', e=>{
+  const r = canvas.getBoundingClientRect();
+  const end = [e.clientX-r.left, e.clientY-r.top];
+  const vx = (end[0]-dragStart[0])*0.05;
+  const vy = (end[1]-dragStart[1])*0.05;
+  const colors = ['#7fffd4','#ff9ff3','#feca57','#48dbfb','#ff6b6b'];
+  bodies.push(new Body(dragStart[0], dragStart[1], vx, vy, 30, 4,
+    colors[Math.floor(Math.random()*colors.length)]));
+  e0 = totalEnergy();
+  dragStart = null;
+});
+
+document.getElementById('pauseBtn').addEventListener('click', e=>{
+  paused = !paused;
+  e.target.textContent = paused ? 'Resume' : 'Pause';
+});
+document.getElementById('resetBtn').addEventListener('click', seed);
+document.getElementById('gSlider').addEventListener('input', e=>{ G = +e.target.value; e0 = totalEnergy(); });
+document.getElementById('trailSlider').addEventListener('input', e=>{ trailMax = +e.target.value; });
+document.getElementById('avoidCheck').addEventListener('change', e=>{ avoidance = e.target.checked; });
+
+seed();
+loop();
+</script>
+</body>
+</html>
