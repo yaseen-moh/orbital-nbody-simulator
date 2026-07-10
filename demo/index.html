@@ -27,12 +27,12 @@
   <div class="controls">
     <button id="pauseBtn">Pause</button>
     <button id="resetBtn">Reset</button>
-    <label>Gravity strength <input type="range" id="gSlider" min="1" max="200" value="1"></label>
-    <label>Trail length <input type="range" id="trailSlider" min="10" max="400" value="10"></label>
+    <label>Gravity strength <input type="range" id="gSlider" min="1" max="200" value="60"></label>
+    <label>Trail length <input type="range" id="trailSlider" min="10" max="400" value="200"></label>
     <label>New body size <span id="radiusVal">5</span>px
-      <input type="range" id="radiusSlider" min="2" max="16" value="16"></label>
-    <label><input type="checkbox" id="avoidCheck" unchecked> Close-approach capture</label>
-    <label><input type="checkbox" id="mergeCheck" unchecked> Merge on collision</label>
+      <input type="range" id="radiusSlider" min="2" max="16" value="5"></label>
+    <label><input type="checkbox" id="avoidCheck" checked> Close-approach capture</label>
+    <label><input type="checkbox" id="mergeCheck" checked> Merge on collision</label>
   </div>
   <canvas id="c" width="860" height="500"></canvas>
   <div id="stats">
